@@ -1150,14 +1150,15 @@ export class SceneCardsSettingTab extends PluginSettingTab {
 
         new Setting(generalBody)
             .setName('Root folder')
-            .setDesc('Root folder for all StoryLine projects in your vault')
+            .setDesc('Root folder for StoryLine projects in your vault (leave empty or "/" to use the vault root)')
             .addText(text => text
-                .setPlaceholder('StoryLine')
+                .setPlaceholder('StoryLine (or leave empty for vault root)')
                 .setValue(this.plugin.settings.storyLineRoot)
                 .onChange(async (value) => {
-                    this.plugin.settings.storyLineRoot = value || 'StoryLine';
+                    const clean = (value || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+                    this.plugin.settings.storyLineRoot = clean;
                     await this.plugin.saveSettings();
-                        }));
+                }));
 
         new Setting(generalBody)
             .setName('Auto-open navigator')

@@ -30,6 +30,8 @@ export interface StoryLineProject {
      * line wrapping. `'auto'` enables script auto-detection from manuscript text.
      */
     locale?: string;
+    /** Derived base folder path (empty string for vault root) */
+    baseFolder?: string;
     /** Derived scene folder path */
     sceneFolder: string;
     /** Derived character folder path */
@@ -102,53 +104,77 @@ export interface SeriesMetadata {
 }
 
 /**
+ * Safely join a base folder and subfolder without leading, trailing, or double slashes.
+ * When base is empty (e.g. vault root), subfolder is returned directly without a leading slash.
+ */
+export function joinProjectPath(base: string, sub: string): string {
+    const cleanBase = (base || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').trim();
+    const cleanSub = (sub || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').trim();
+    if (!cleanBase) return cleanSub;
+    if (!cleanSub) return cleanBase;
+    return `${cleanBase}/${cleanSub}`;
+}
+
+/**
  * Build derived folder paths from a root folder and project title.
+ * When title is omitted or matches the rootFolder, rootFolder itself is used as the base.
+ * Avoids redundant nested subfolders and leading slashes for vault root.
  */
 export function deriveProjectFolders(
     rootFolder: string,
-    title: string
-): { sceneFolder: string; characterFolder: string; locationFolder: string; codexFolder: string; notesFolder: string; sceneNotesFolder: string; archiveFolder: string; researchFolder: string } {
-    const base = `${rootFolder}/${title}`;
+    title?: string
+): { baseFolder: string; sceneFolder: string; characterFolder: string; locationFolder: string; codexFolder: string; notesFolder: string; sceneNotesFolder: string; archiveFolder: string; researchFolder: string } {
+    const cleanRoot = (rootFolder || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').trim();
+    const cleanTitle = (title || '').replace(/[\\/:*?"<>|]/g, '-').trim();
+
+    // If cleanTitle is provided and cleanRoot doesn't already end with cleanTitle,
+    // nest under cleanTitle only when cleanRoot is not intended as the exact project root.
+    const baseFolder = cleanTitle
+        ? (cleanRoot ? (cleanRoot.endsWith(`/${cleanTitle}`) || cleanRoot === cleanTitle ? cleanRoot : `${cleanRoot}/${cleanTitle}`) : cleanTitle)
+        : cleanRoot;
+
     return {
-        sceneFolder: `${base}/Scenes`,
-        characterFolder: `${base}/Codex/Characters`,
-        locationFolder: `${base}/Codex/Locations`,
-        codexFolder: `${base}/Codex`,
-        notesFolder: `${base}/Notes`,
-        sceneNotesFolder: `${base}/SceneNotes`,
-        archiveFolder: `${base}/Archive`,
-        researchFolder: `${base}/Research`,
+        baseFolder,
+        sceneFolder: joinProjectPath(baseFolder, 'Scenes'),
+        characterFolder: joinProjectPath(baseFolder, 'Codex/Characters'),
+        locationFolder: joinProjectPath(baseFolder, 'Codex/Locations'),
+        codexFolder: joinProjectPath(baseFolder, 'Codex'),
+        notesFolder: joinProjectPath(baseFolder, 'Notes'),
+        sceneNotesFolder: joinProjectPath(baseFolder, 'SceneNotes'),
+        archiveFolder: joinProjectPath(baseFolder, 'Archive'),
+        researchFolder: joinProjectPath(baseFolder, 'Research'),
     };
 }
 
 /**
  * Derive project folder paths from the project .md file's actual location.
- * Works for projects anywhere in the vault — not tied to storyLineRoot.
+ * Works for projects anywhere in the vault — including the vault root (empty baseFolder)
+ * or any custom directory, without forcing redundant nested subdirectories.
  *
- * Layout detection:
- *  - New layout:  `Any/Path/MyNovel/MyNovel.md`  → base = `Any/Path/MyNovel`
- *  - Legacy:      `Any/Path/MyNovel.md`           → base = `Any/Path/MyNovel`
+ * The directory containing the project .md file directly serves as the project base:
+ *  - Vault root:    `MyNovel.md`          → base = `""`, scenes = `Scenes`
+ *  - Custom folder: `Writing/MyNovel.md`  → base = `Writing`, scenes = `Writing/Scenes`
+ *  - Project dir:   `Novels/Book1/Book.md`→ base = `Novels/Book1`, scenes = `Novels/Book1/Scenes`
  */
 export function deriveProjectFoldersFromFilePath(
     filePath: string
 ): { baseFolder: string; sceneFolder: string; characterFolder: string; locationFolder: string; codexFolder: string; notesFolder: string; sceneNotesFolder: string; archiveFolder: string; researchFolder: string } {
-    const lastSlash = filePath.lastIndexOf('/');
-    const parentDir = lastSlash >= 0 ? filePath.substring(0, lastSlash) : '';
-    const basename = (filePath.split('/').pop() ?? '').replace(/\.md$/i, '');
-    const parentName = parentDir.split('/').pop() ?? '';
+    const normalized = filePath.replace(/\\/g, '/');
+    const lastSlash = normalized.lastIndexOf('/');
+    const parentDir = lastSlash >= 0 ? normalized.substring(0, lastSlash).trim() : '';
+    const baseFolder = parentDir.replace(/^\/+|\/+$/g, '');
 
-    // If the file sits inside a folder with the same name → new layout
-    const baseFolder = (parentName === basename) ? parentDir : `${parentDir}/${basename}`;
     return {
         baseFolder,
-        sceneFolder: `${baseFolder}/Scenes`,
-        characterFolder: `${baseFolder}/Codex/Characters`,
-        locationFolder: `${baseFolder}/Codex/Locations`,
-        codexFolder: `${baseFolder}/Codex`,
-        notesFolder: `${baseFolder}/Notes`,
-        sceneNotesFolder: `${baseFolder}/SceneNotes`,
-        archiveFolder: `${baseFolder}/Archive`,
-        researchFolder: `${baseFolder}/Research`,
+        sceneFolder: joinProjectPath(baseFolder, 'Scenes'),
+        characterFolder: joinProjectPath(baseFolder, 'Codex/Characters'),
+        locationFolder: joinProjectPath(baseFolder, 'Codex/Locations'),
+        codexFolder: joinProjectPath(baseFolder, 'Codex'),
+        notesFolder: joinProjectPath(baseFolder, 'Notes'),
+        sceneNotesFolder: joinProjectPath(baseFolder, 'SceneNotes'),
+        archiveFolder: joinProjectPath(baseFolder, 'Archive'),
+        researchFolder: joinProjectPath(baseFolder, 'Research'),
     };
 }
+
  

@@ -2633,17 +2633,24 @@ export class BoardView extends ItemView {
      * Open a scene in the editor
      */
     private async openScene(scene: Scene): Promise<void> {
-        const file = this.app.vault.getAbstractFileByPath(scene.filePath);
+        const normPath = normalizePath(scene.filePath);
+        const file = this.app.vault.getAbstractFileByPath(normPath);
         if (file instanceof TFile) {
-            // #224 — Reuse an existing tab that already shows this file instead of opening a duplicate.
-            const existing = this.app.workspace.getLeavesOfType('markdown')
-                .find(leaf => leaf.getViewState()?.state?.file === scene.filePath);
-            if (existing) {
-                this.app.workspace.setActiveLeaf(existing, { focus: true });
-                return;
+            try {
+                // #224 — Reuse an existing tab that already shows this file instead of opening a duplicate.
+                const existing = this.app.workspace.getLeavesOfType('markdown')
+                    .find(leaf => (leaf.getViewState()?.state as { file?: string } | undefined)?.file === normPath);
+                if (existing) {
+                    this.app.workspace.setActiveLeaf(existing, { focus: true });
+                    return;
+                }
+                const leaf = this.app.workspace.getLeaf('tab');
+                if (leaf) {
+                    await leaf.openFile(file, { state: { mode: 'source', source: false } });
+                }
+            } catch (err) {
+                console.warn('[StoryLine] Could not open scene file tab:', err);
             }
-            const leaf = this.app.workspace.getLeaf('tab');
-            await leaf.openFile(file, { state: { mode: 'source', source: false } });
         } else {
             new Notice(`Could not find file: ${scene.filePath}`);
         }
@@ -3925,11 +3932,34 @@ export class BoardView extends ItemView {
             this.plugin,
             this.sceneManager,
             async (sceneData, openAfter) => {
-                const file = await this.sceneManager.createScene(sceneData);
+                let file: TFile;
+                try {
+                    file = await this.sceneManager.createScene(sceneData);
+                } catch (error) {
+                    console.error('[StoryLine] Failed to create scene:', error);
+                    new Notice(`Failed to create scene: ${error instanceof Error ? error.message : String(error)}`, 6000);
+                    return;
+                }
+
+                new Notice(`Scene created: ${file.basename}`);
                 this.refreshBoard();
 
                 if (openAfter) {
-                    await this.app.workspace.getLeaf('tab').openFile(file, { state: { mode: 'source', source: false } });
+                    try {
+                        const normPath = normalizePath(file.path);
+                        const existing = this.app.workspace.getLeavesOfType('markdown')
+                            .find(leaf => (leaf.getViewState()?.state as { file?: string } | undefined)?.file === normPath);
+                        if (existing) {
+                            this.app.workspace.setActiveLeaf(existing, { focus: true });
+                        } else {
+                            const leaf = this.app.workspace.getLeaf('tab');
+                            if (leaf) {
+                                await leaf.openFile(file, { state: { mode: 'source', source: false } });
+                            }
+                        }
+                    } catch (openErr) {
+                        console.warn('[StoryLine] Scene created successfully, but opening file tab threw:', openErr);
+                    }
                 }
             },
             defaults
@@ -4067,16 +4097,22 @@ export class BoardView extends ItemView {
         this.selectedScenes.clear();
         this.inspectorComponent?.hide();
 
-        const file = await this.sceneManager.createScene({
-            status: 'idea',
-            corkboardNote: true,
-        });
+        try {
+            const file = await this.sceneManager.createScene({
+                status: 'idea',
+                corkboardNote: true,
+            });
 
-        const pos = this.getNextQuickNotePosition();
-        this.setCorkboardPosition(file.path, pos);
-        this.schedulePersistCorkboardLayout();
+            const pos = this.getNextQuickNotePosition();
+            this.setCorkboardPosition(normalizePath(file.path), pos);
+            this.schedulePersistCorkboardLayout();
 
-        this.refreshBoard();
+            this.refreshBoard();
+            new Notice('Note created');
+        } catch (error) {
+            console.error('[StoryLine] Failed to create corkboard note:', error);
+            new Notice(`Failed to create note: ${error instanceof Error ? error.message : String(error)}`, 6000);
+        }
     }
 
     // ── Image sticky note helpers ────────────────────────
@@ -4352,7 +4388,7 @@ export class BoardView extends ItemView {
             corkboardNoteImage: imagePath,
         });
 
-        this.setCorkboardPosition(file.path, {
+        this.setCorkboardPosition(normalizePath(file.path), {
             x: worldX,
             y: worldY,
             z: this.getCurrentMaxCorkboardZ() + 1,

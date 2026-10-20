@@ -504,6 +504,7 @@ export class CodexManager {
 
     private async ensureFolder(folderPath: string): Promise<void> {
         const normalized = normalizePath(folderPath);
+        if (!normalized || normalized === '/' || normalized === '.') return;
         if (this.app.vault.getAbstractFileByPath(normalized)) return;
         await this.app.vault.createFolder(normalized);
     }

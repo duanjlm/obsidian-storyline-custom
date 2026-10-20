@@ -496,14 +496,16 @@ export class LocationManager {
     }
 
     private async ensureFolder(folderPath: string): Promise<void> {
+        const clean = (folderPath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+        if (!clean || clean === '.') return;
         // Issue #227 — use the vault adapter (filesystem) as the source of
         // truth rather than getAbstractFileByPath(), whose in-memory cache
         // can lag behind the filesystem (especially on Linux). When the
         // cache misses, createFolder() throws "Folder already exists".
         const adapter = this.app.vault.adapter;
-        if (await adapter.exists(folderPath)) return;
+        if (await adapter.exists(clean)) return;
         try {
-            await this.app.vault.createFolder(folderPath);
+            await this.app.vault.createFolder(clean);
         } catch (e) {
             if (await adapter.exists(folderPath)) return;
             throw e;

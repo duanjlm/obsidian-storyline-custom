@@ -2689,13 +2689,19 @@ export class PlotgridView extends ItemView {
             this.plugin,
             scMgr,
             async (sceneData, openAfter) => {
-                const file = await scMgr.createScene(sceneData);
-                const c = this.data.cells[cellKey];
-                if (c) c.linkedSceneId = file.path;
-                this.scheduleSave();
-                this.renderGrid();
-                if (openAfter) {
-                    await this.app.workspace.getLeaf('tab').openFile(file, { state: { mode: 'source', source: false } });
+                try {
+                    const file = await scMgr.createScene(sceneData);
+                    new Notice(`Scene created: ${file.basename}`);
+                    const c = this.data.cells[cellKey];
+                    if (c) c.linkedSceneId = file.path;
+                    this.scheduleSave();
+                    this.renderGrid();
+                    if (openAfter) {
+                        await this.app.workspace.getLeaf('tab').openFile(file, { state: { mode: 'source', source: false } });
+                    }
+                } catch (error) {
+                    console.error('[StoryLine] Failed to create scene:', error);
+                    new Notice(`Failed to create scene: ${error instanceof Error ? error.message : String(error)}`, 6000);
                 }
             }
         );

@@ -1236,17 +1236,27 @@ export class TimelineView extends ItemView {
             this.plugin,
             this.sceneManager,
             async (sceneData, openAfter) => {
-                if (presetAct !== undefined) {
-                    sceneData.act = presetAct;
+                let file: TFile;
+                try {
+                    if (presetAct !== undefined) {
+                        sceneData.act = presetAct;
+                    }
+                    file = await this.sceneManager.createScene(sceneData);
+                } catch (error) {
+                    console.error('[StoryLine] Failed to create scene:', error);
+                    new Notice(`Failed to create scene: ${error instanceof Error ? error.message : String(error)}`, 6000);
+                    return;
                 }
-                const file = await this.sceneManager.createScene(sceneData);
+
+                new Notice(`Scene created: ${file.basename}`);
                 this.refresh();
                 // Scroll to the newly created scene card. With 100+ scenes
                 // the rebuilt DOM may not be laid out within a single frame,
                 // so retry after a short timeout as well.
+                const normPath = normalizePath(file.path);
                 const scrollToNew = () => {
                     const newEntry = this.rootContainer?.querySelector(
-                        `[data-path="${CSS.escape(file.path)}"]`
+                        `[data-path="${CSS.escape(normPath)}"]`
                     );
                     if (newEntry) {
                         newEntry.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1254,8 +1264,22 @@ export class TimelineView extends ItemView {
                 };
                 window.requestAnimationFrame(scrollToNew);
                 window.setTimeout(scrollToNew, 50);
+
                 if (openAfter) {
-                    await this.app.workspace.getLeaf('tab').openFile(file, { state: { mode: 'source', source: false } });
+                    try {
+                        const existing = this.app.workspace.getLeavesOfType('markdown')
+                            .find(leaf => (leaf.getViewState()?.state as { file?: string } | undefined)?.file === normPath);
+                        if (existing) {
+                            this.app.workspace.setActiveLeaf(existing, { focus: true });
+                        } else {
+                            const leaf = this.app.workspace.getLeaf('tab');
+                            if (leaf) {
+                                await leaf.openFile(file, { state: { mode: 'source', source: false } });
+                            }
+                        }
+                    } catch (openErr) {
+                        console.warn('[StoryLine] Scene created successfully, but opening file tab threw:', openErr);
+                    }
                 }
             }
         );
@@ -1757,17 +1781,24 @@ export class TimelineView extends ItemView {
     }
 
     private async openScene(scene: Scene): Promise<void> {
-        const file = this.app.vault.getAbstractFileByPath(scene.filePath);
+        const normPath = normalizePath(scene.filePath);
+        const file = this.app.vault.getAbstractFileByPath(normPath);
         if (file instanceof TFile) {
-            // #224 — Reuse an existing tab that already shows this file instead of opening a duplicate.
-            const existing = this.app.workspace.getLeavesOfType('markdown')
-                .find(leaf => leaf.getViewState()?.state?.file === scene.filePath);
-            if (existing) {
-                this.app.workspace.setActiveLeaf(existing, { focus: true });
-                return;
+            try {
+                // #224 — Reuse an existing tab that already shows this file instead of opening a duplicate.
+                const existing = this.app.workspace.getLeavesOfType('markdown')
+                    .find(leaf => (leaf.getViewState()?.state as { file?: string } | undefined)?.file === normPath);
+                if (existing) {
+                    this.app.workspace.setActiveLeaf(existing, { focus: true });
+                    return;
+                }
+                const leaf = this.app.workspace.getLeaf('tab');
+                if (leaf) {
+                    await leaf.openFile(file, { state: { mode: 'source', source: false } });
+                }
+            } catch (err) {
+                console.warn('[StoryLine] Could not open scene file tab:', err);
             }
-            const leaf = this.app.workspace.getLeaf('tab');
-            await leaf.openFile(file, { state: { mode: 'source', source: false } });
         } else {
             new Notice(`Could not find file: ${scene.filePath}`);
         }

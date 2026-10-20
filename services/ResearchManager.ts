@@ -392,8 +392,10 @@ export class ResearchManager {
     // ────────────────────────────────────
 
     private async ensureFolder(path: string): Promise<void> {
-        if (!this.app.vault.getAbstractFileByPath(path)) {
-            await this.app.vault.createFolder(path);
+        const clean = (path || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+        if (!clean || clean === '.') return;
+        if (!this.app.vault.getAbstractFileByPath(clean)) {
+            await this.app.vault.createFolder(clean);
         }
     }
 }

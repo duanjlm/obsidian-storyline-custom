@@ -65,6 +65,18 @@ export class QuickAddModal extends Modal {
                 text.setPlaceholder('Scene title...')
                     .onChange(value => this.result.title = value);
                 text.inputEl.addClass('story-line-title-input');
+                text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (!this.result.title) {
+                            new Notice('Please enter a scene title');
+                            return;
+                        }
+                        this.prepareResult();
+                        this.onSubmit(this.result, false);
+                        this.close();
+                    }
+                });
                 // Auto-focus
                 window.setTimeout(() => text.inputEl.focus(), 50);
             });

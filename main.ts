@@ -853,11 +853,11 @@ export default class SceneCardsPlugin extends Plugin {
                     const isMarkdown = view?.getViewType?.() === 'markdown';
                     const file = view?.file ?? null;
                     const sf = this.sceneManager?.activeProject?.sceneFolder;
-                    const projectRoot = sf ? sf.replace(/\/Scenes$/, '') : undefined;
+                    const projectRoot = sf ? sf.replace(/\/Scenes$/, '') : (sf === '' ? '' : undefined);
                     const isStoryLineScene = isMarkdown
                         && !!file
-                        && !!projectRoot
-                        && file.path.startsWith(projectRoot);
+                        && projectRoot !== undefined
+                        && (projectRoot === '' || file.path === projectRoot || file.path.startsWith(projectRoot + '/'));
                     if (!isStoryLineScene) {
                         // Still tear down toolbars if the setting was turned off,
                         // but don't do any other DOM work.
@@ -1481,16 +1481,20 @@ export default class SceneCardsPlugin extends Plugin {
     getProjectBaseFolder(): string {
         const project = this.sceneManager?.activeProject ?? null;
         if (project) {
-            return project.sceneFolder.replace(/\\/g, '/').replace(/\/Scenes\/?$/, '');
+            if (project.baseFolder !== undefined) {
+                return project.baseFolder.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            }
+            return project.sceneFolder.replace(/\\/g, '/').replace(/(^|\/)Scenes\/?$/, '').replace(/^\/+|\/+$/g, '');
         }
-        return this.settings.storyLineRoot.replace(/\\/g, '/');
+        return (this.settings.storyLineRoot || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
     }
 
     /**
      * Return the System/ subfolder path for the active project.
      */
     getProjectSystemFolder(): string {
-        return `${this.getProjectBaseFolder()}/System`;
+        const base = this.getProjectBaseFolder();
+        return base ? `${base}/System` : 'System';
     }
 
     // ────────────────────────────────────
@@ -1616,10 +1620,11 @@ export default class SceneCardsPlugin extends Plugin {
     ): Promise<void> {
         try {
             const adapter = this.app.vault.adapter;
-            if (!await adapter.exists(systemFolder)) {
-                await this.app.vault.createFolder(systemFolder);
+            const normFolder = normalizePath(systemFolder);
+            if (normFolder && normFolder !== '/' && normFolder !== '.' && !await adapter.exists(normFolder)) {
+                await this.app.vault.createFolder(normFolder);
             }
-            const filePath = `${systemFolder}/${filename}`;
+            const filePath = normFolder ? `${normFolder}/${filename}` : filename;
             const serialized = JSON.stringify(data, null, 2);
             // Issue #242 — skip the write when the serialized content is
             // identical to what's already on disk. The 5-minute safety-net
@@ -2209,11 +2214,34 @@ export default class SceneCardsPlugin extends Plugin {
             this,
             this.sceneManager,
             async (sceneData, openAfter) => {
-                const file = await this.sceneManager.createScene(sceneData);
+                let file: TFile;
+                try {
+                    file = await this.sceneManager.createScene(sceneData);
+                } catch (error) {
+                    console.error('[StoryLine] Failed to create scene:', error);
+                    new Notice(`Failed to create scene: ${error instanceof Error ? error.message : String(error)}`, 6000);
+                    return;
+                }
+
+                new Notice(`Scene created: ${file.basename}`);
                 this.refreshOpenViews();
 
                 if (openAfter) {
-                    await this.app.workspace.getLeaf('tab').openFile(file, { state: { mode: 'source', source: false } });
+                    try {
+                        const normPath = normalizePath(file.path);
+                        const existing = this.app.workspace.getLeavesOfType('markdown')
+                            .find(leaf => (leaf.getViewState()?.state as { file?: string } | undefined)?.file === normPath);
+                        if (existing) {
+                            this.app.workspace.setActiveLeaf(existing, { focus: true });
+                        } else {
+                            const leaf = this.app.workspace.getLeaf('tab');
+                            if (leaf) {
+                                await leaf.openFile(file, { state: { mode: 'source', source: false } });
+                            }
+                        }
+                    } catch (openErr) {
+                        console.warn('[StoryLine] Scene created successfully, but opening file tab threw:', openErr);
+                    }
                 }
             }
         );
@@ -2665,9 +2693,13 @@ export default class SceneCardsPlugin extends Plugin {
     }
 
     private isPathInside(filePath: string, folderPath: string): boolean {
-        const file = normalizePath(filePath).replace(/\/$/, '');
-        const folder = normalizePath(folderPath).replace(/\/$/, '');
-        return Boolean(folder) && (file === folder || file.startsWith(`${folder}/`));
+        const file = normalizePath(filePath).replace(/^\/+|\/+$/g, '');
+        const folder = normalizePath(folderPath).replace(/^\/+|\/+$/g, '');
+        if (!folder) {
+            // Empty folder represents the vault root: all non-system files belong inside
+            return true;
+        }
+        return file === folder || file.startsWith(`${folder}/`);
     }
 
     private getConfiguredExtraFolderPaths(): string[] {
@@ -2684,11 +2716,14 @@ export default class SceneCardsPlugin extends Plugin {
 
     private isRelevantStoryLineFile(filePath: string): boolean {
         const activeProject = this.sceneManager?.activeProject;
-        if (!activeProject) return false;
-
         const normalized = normalizePath(filePath);
         const systemFolder = this.getProjectSystemFolder();
         if (this.isPathInside(normalized, systemFolder)) return false;
+
+        if (!activeProject) {
+            const root = (this.settings.storyLineRoot || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            return this.isPathInside(normalized, root);
+        }
 
         try {
             if (normalized === normalizePath(activeProject.filePath)
@@ -2763,7 +2798,7 @@ export default class SceneCardsPlugin extends Plugin {
             const projectKey = this.sceneManager.activeProject?.filePath;
             const projectBase = this.getProjectBaseFolder().replace(/\\/g, '/').replace(/\/$/, '');
             const normalizedOldPath = oldPath.replace(/\\/g, '/');
-            if (!projectKey || !normalizedOldPath.startsWith(projectBase + '/')) return;
+            if (!projectKey || !this.isPathInside(normalizedOldPath, projectBase)) return;
 
             const data = await this.loadPlotGrid();
             if (!data?.cells) return;

@@ -652,9 +652,11 @@ export class SeriesManager {
     }
 
     private async ensureFolder(folderPath: string): Promise<void> {
+        const clean = (folderPath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+        if (!clean || clean === '.') return;
         const adapter = this.app.vault.adapter;
-        if (!await adapter.exists(folderPath)) {
-            await adapter.mkdir(folderPath);
+        if (!await adapter.exists(clean)) {
+            await adapter.mkdir(clean);
         }
     }
 }
